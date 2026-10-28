@@ -159,14 +159,19 @@ app.use((err: unknown, req: Request, res: Response, _next: NextFunction) => {
   res.status(500).json({ error: "Internal server error" });
 });
 
-const server = app.listen(config.port, () => {
-  log("info", "listening", { port: config.port, paypal: config.mockPayPal ? "mock" : config.paypalBase, auth: Boolean(config.authUser), production: config.production });
-});
+export default app;
 
-const shutdown = (signal: string) => {
-  log("info", "shutting_down", { signal });
-  server.close(() => process.exit(0));
-  setTimeout(() => process.exit(1), 10_000).unref();
-};
-process.on("SIGTERM", () => shutdown("SIGTERM"));
-process.on("SIGINT", () => shutdown("SIGINT"));
+// On Vercel the platform invokes the exported app; there is no long-running listener.
+if (!process.env.VERCEL) {
+  const server = app.listen(config.port, () => {
+    log("info", "listening", { port: config.port, paypal: config.mockPayPal ? "mock" : config.paypalBase, auth: Boolean(config.authUser), production: config.production });
+  });
+
+  const shutdown = (signal: string) => {
+    log("info", "shutting_down", { signal });
+    server.close(() => process.exit(0));
+    setTimeout(() => process.exit(1), 10_000).unref();
+  };
+  process.on("SIGTERM", () => shutdown("SIGTERM"));
+  process.on("SIGINT", () => shutdown("SIGINT"));
+}
