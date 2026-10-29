@@ -47,6 +47,44 @@ export interface Health {
   provider: "openai" | "gemini";
   model: string;
   maxAcceptAmount: number;
+  persistence: "postgres" | "memory";
+}
+
+export interface BatchStatus {
+  running: boolean;
+  total: number;
+  done: number;
+  failed: number;
+  startedAt: string | null;
+  finishedAt: string | null;
+}
+
+export interface AnalyticsRow {
+  dispute_id: string;
+  buyer: string;
+  item: string;
+  reason: string;
+  status: string;
+  amount: number;
+  created: string | null;
+  due_date: string | null;
+  days_left: number | null;
+  deadline_bucket: string;
+  open_cases: number;
+  open_amount: number;
+  due_soon: number;
+  analysis: string;
+  priority: string;
+  recommended_action: string;
+  win_probability: number | null;
+  fraud_signals: number;
+  expected_loss: number;
+}
+
+export interface Analytics {
+  rows: AnalyticsRow[];
+  batch: BatchStatus;
+  generatedAt: string;
 }
 
 export interface AuditEntry {
@@ -79,4 +117,7 @@ export const api = {
   act: (id: string, body: ActionBody) =>
     call<{ dispute: DisputeDetail }>(`/disputes/${id}/actions`, { method: "POST", body: JSON.stringify(body) }),
   audit: () => call<AuditEntry[]>("/audit"),
+  analytics: () => call<Analytics>("/analytics"),
+  triageAll: (force = false) => call<BatchStatus>(`/triage-all${force ? "?force=true" : ""}`, { method: "POST" }),
+  triageStatus: () => call<BatchStatus>("/triage-all"),
 };

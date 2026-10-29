@@ -7,19 +7,19 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import { AiError, triageDispute } from "./agent.js";
+import { buildAnalyticsRows } from "./analytics.js";
 import { basicAuth } from "./auth.js";
+import { batchStatus, runBatch } from "./batch.js";
 import { config } from "./config.js";
 import { PayPalError, type PayPalGateway } from "./gateway.js";
+import { studioLlmTurn } from "./llmProxy.js";
+import { log } from "./logger.js";
 import { mockPayPal } from "./mock.js";
 import { livePayPal } from "./paypal.js";
+import { store } from "./store.js";
 
 const pp: PayPalGateway = config.mockPayPal ? mockPayPal : livePayPal;
-const MAX_AUDIT = 500;
-const audit: { time: string; disputeId: string; action: string; detail: string }[] = [];
 const inFlight = new Set<string>();
-
-const log = (level: "info" | "error", msg: string, extra: Record<string, unknown> = {}) =>
-  console.log(JSON.stringify({ time: new Date().toISOString(), level, msg, ...extra }));
 
 const DisputeId = z.string().regex(/^[A-Za-z0-9-]{1,64}$/, "Invalid dispute id");
 const idOf = (req: Request) => DisputeId.parse(req.params.id);
@@ -70,6 +70,9 @@ app.get("/healthz", (_req, res) => res.json({ status: "ok" }));
 
 if (config.authUser && config.authPassword) app.use(basicAuth(config.authUser, config.authPassword));
 
+// AG Studio agent turns carry the full tool schemas, so this route needs a larger body limit than the rest of the API.
+app.post("/api/studio-llm", limiter(60), express.json({ limit: "2mb" }), route(async (req, res) => res.json(await studioLlmTurn(req.body))));
+
 app.use("/api", limiter(120), express.json({ limit: "100kb" }));
 
 app.get("/api/health", (_req, res) => {
@@ -79,6 +82,7 @@ app.get("/api/health", (_req, res) => {
     provider: config.aiProvider,
     model: config.aiModel,
     maxAcceptAmount: config.maxAcceptAmount,
+    persistence: store.kind,
   });
 });
 
@@ -86,7 +90,33 @@ app.get("/api/disputes", route(async (_req, res) => res.json(await pp.listDisput
 
 app.get("/api/disputes/:id", route(async (req, res) => res.json(await pp.getDispute(idOf(req)))));
 
-app.post("/api/disputes/:id/triage", limiter(10), route(async (req, res) => res.json(await triageDispute(idOf(req), pp))));
+app.post(
+  "/api/disputes/:id/triage",
+  limiter(10),
+  route(async (req, res) => {
+    const id = idOf(req);
+    const result = await triageDispute(id, pp);
+    await store.saveTriage(id, result.triage).catch((err) => log("error", "triage_save_failed", { disputeId: id, message: String(err) }));
+    res.json(result);
+  }),
+);
+
+app.get("/api/analytics", route(async (_req, res) => res.json({ rows: await buildAnalyticsRows(pp), batch: batchStatus(), generatedAt: new Date().toISOString() })));
+
+app.get("/api/triage-all", (_req, res) => res.json(batchStatus()));
+
+app.post(
+  "/api/triage-all",
+  limiter(3),
+  route(async (req, res) => {
+    const force = req.query.force === "true";
+    // Serverless hosts freeze the process once the response is sent, so wait for the batch there.
+    if (process.env.VERCEL) return res.json(await runBatch(pp, force));
+    if (!config.aiKey) throw new AiError("AI is not configured on the server");
+    runBatch(pp, force).catch((err) => log("error", "batch_failed", { message: String(err) }));
+    res.status(202).json({ ...batchStatus(), running: true });
+  }),
+);
 
 app.post(
   "/api/disputes/:id/actions",
@@ -120,9 +150,8 @@ app.post(
       }
 
       const entry = { time: new Date().toISOString(), disputeId: id, action: body.action, detail };
-      audit.unshift(entry);
-      audit.length = Math.min(audit.length, MAX_AUDIT);
       log("info", "audit", entry);
+      await store.addAudit(entry).catch((err) => log("error", "audit_save_failed", { disputeId: id, message: String(err) }));
       res.json({ result, dispute: await pp.getDispute(id) });
     } finally {
       inFlight.delete(id);
@@ -130,7 +159,7 @@ app.post(
   }),
 );
 
-app.get("/api/audit", (_req, res) => res.json(audit));
+app.get("/api/audit", route(async (_req, res) => res.json(await store.listAudit())));
 
 app.use("/api", (_req, res) => res.status(404).json({ error: "Not found" }));
 

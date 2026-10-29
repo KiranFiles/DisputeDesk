@@ -5,6 +5,8 @@ COPY server/package.json server/
 COPY client/package.json client/
 RUN npm ci
 COPY . .
+ARG VITE_AG_STUDIO_LICENSE=
+ENV VITE_AG_STUDIO_LICENSE=$VITE_AG_STUDIO_LICENSE
 RUN npm run build
 
 FROM node:22-alpine

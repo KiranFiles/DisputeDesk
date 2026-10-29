@@ -24,10 +24,31 @@ DisputeDesk is a review-and-approve console. An OpenAI agent investigates each d
 ```mermaid
 flowchart LR
     UI[React UI] --> API[Express API]
-    API --> Agent[OpenAI agent<br/>tool calling]
+    UI --> Studio[AG Studio dashboard]
+    Studio -->|agent turns| API
+    API --> Agent[AI agent<br/>tool calling]
     Agent -->|tools| PP[PayPal Disputes +<br/>Transaction Search APIs]
     API -->|approved actions| PP
+    API --> DB[(Postgres)]
+    Cron[Render cron] -->|bulk triage| Agent
 ```
+
+### Insights dashboard (AG Studio)
+
+The **Insights** tab embeds [AG Studio](https://www.ag-grid.com/studio/) with a pre-built, merchant-themed dashboard over every dispute (`GET /api/analytics`):
+
+- **Overview** page: KPIs (open cases, money at risk, due within 3 days, average AI win estimate), money at risk by reason, open cases by AI priority, expected loss by deadline window, and money at risk by suggested action.
+- **All cases** page: an AG Grid table with status and priority filters that cross-filter the grid.
+- **Case queue**, a custom widget: open disputes ordered by deadline and colour-coded by urgency. Clicking a card opens the case in the case workspace.
+- **Customize + Ask AI** switches to edit mode, where merchants can rearrange widgets, build their own, and use the Studio Agent Framework chat. Layout changes persist in the browser; the reset button restores the default.
+
+The agent framework runs on the same model as triage, through `POST /api/studio-llm`, so the AI key never reaches the browser. The lead agent has two extra tools: `open_case` (opens a case for review) and `triage_open_cases` (read-only bulk triage). It cannot refund, message buyers or submit evidence; those still need approval in the case workspace.
+
+### Bulk triage and persistence
+
+- **Triage all open cases** (`POST /api/triage-all`) analyses every open dispute that has no stored result, a few at a time, and never writes to PayPal. Progress is at `GET /api/triage-all`.
+- Triage results and the action log are stored in Postgres when `DATABASE_URL` is set, and in memory otherwise.
+- `node server/dist/worker.js` runs the same bulk triage once and exits. `render.yaml` schedules it as a Render cron job so cases are already analysed when the merchant opens the app.
 
 ### Guardrails
 
@@ -45,6 +66,8 @@ flowchart LR
 | PayPal Transaction Search API | Transaction, payer and shipping context for the agent |
 | PayPal OAuth 2.0 | Client-credentials auth with token caching and refresh |
 | OpenAI (`gpt-4o` by default) or Google Gemini (`gemini-2.5-flash` by default) | Tool-calling triage agent; OpenAI uses strict JSON-schema output, Gemini uses the OpenAI-compatible endpoint with the schema in the prompt |
+| AG Studio (AG Grid) | Embedded analytics dashboard, custom case-queue widget, theming, and the Studio Agent Framework with custom tools |
+| Render | Docker web service, Postgres database and cron job for scheduled triage (`render.yaml`) |
 
 ## Quick start
 
@@ -59,7 +82,7 @@ npm run dev
 
 Open http://localhost:5173.
 
-- **Without PayPal credentials**, the app serves four built-in sample disputes (item not received, unauthorised/fraud, not as described, return not refunded). The full flow works against them, with state kept in memory. The header badge reads "PayPal: sample data".
+- **Without PayPal credentials** (or with `MOCK_PAYPAL=true`), the app serves eleven built-in sample disputes (item not received, unauthorised/fraud, not as described, refund not received, plus resolved cases). The full flow works against them, with state kept in memory unless `DATABASE_URL` is set. The header badge reads "Sample data".
 - **With PayPal sandbox credentials**, it uses the live sandbox API. The badge reads "PayPal: sandbox live".
 
 The **Run AI triage** button stays disabled, with a hint, until `OPENAI_API_KEY` is set and the server has been restarted.
@@ -109,6 +132,9 @@ Sandbox account emails and passwords are under **Testing Tools > Sandbox Account
 | `BASIC_AUTH_USER` / `BASIC_AUTH_PASSWORD` | none | Enables HTTP basic auth; required in production (password 12+ chars) |
 | `TRUST_PROXY` | `0` | Reverse-proxy hops, for correct per-IP rate limiting |
 | `PORT` | `3001` | API and production UI port |
+| `DATABASE_URL` | none | Postgres connection string; blank keeps the action log and triage results in memory |
+| `TRIAGE_CONCURRENCY` | `3` | Disputes analysed in parallel by bulk triage |
+| `VITE_AG_STUDIO_LICENSE` | none | AG Studio licence key, read at build time; without it the dashboard shows a trial watermark |
 
 ## Production
 
@@ -122,9 +148,19 @@ docker build -t disputedesk . && docker run --env-file .env -e NODE_ENV=producti
 
 Built in: basic auth, Helmet headers, per-route rate limits, upstream timeouts, token refresh, per-dispute action locking, JSON logs, graceful shutdown and `/healthz` for probes. Terminate TLS at a reverse proxy.
 
+### Deploy on Render
+
+`render.yaml` defines the web service, a Postgres database and a 30-minute cron job. Create a Blueprint from the repository, then fill the `sync: false` values (PayPal credentials, AI key, basic-auth login, optional AG Studio licence). The cron job needs the same values as the web service. For a Gemini key, add `GEMINI_API_KEY` to both services.
+
+A free Gemini key allows about 20 requests per day, and one triage uses several, so use a paid key for bulk triage.
+
+### Deploy on Vercel
+
+`vercel.json` still works, but serverless functions have no persistent memory and a 60-second limit, so bulk triage runs inline and results reset between invocations. Use Render for the full experience.
+
 ## Limitations
 
-- The in-app action log is in memory. The `audit` lines on stdout are the durable record.
+- The in-app action log and triage results are in memory unless `DATABASE_URL` is set. The `audit` lines on stdout are always written.
 - One shared login, not per-user accounts.
 - Evidence submission sends notes and tracking details only, with no file attachments.
 - No automated tests yet.
@@ -137,3 +173,10 @@ Built in: basic auth, Helmet headers, per-route rate limits, upstream timeouts, 
 - `server/src/index.ts`: API, validation, guardrails, security middleware
 - `server/src/config.ts`: environment validation
 - `client/src/App.tsx`: review and approval UI
+- `client/src/Dashboard.tsx`: AG Studio dashboard, agent harness and custom tools
+- `client/src/CaseQueueWidget.tsx`: custom Studio widget
+- `client/src/studioAdapter.ts`: LLM adapter that routes Studio agent turns through the server
+- `server/src/analytics.ts`: flat dispute rows for the dashboard
+- `server/src/batch.ts`, `server/src/worker.ts`: bulk triage and its cron entry point
+- `server/src/store.ts`: Postgres or in-memory persistence
+- `server/src/llmProxy.ts`: server-side LLM proxy for the Studio agents

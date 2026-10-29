@@ -24,6 +24,8 @@ const Env = z.object({
   BASIC_AUTH_USER: z.string().default(""),
   BASIC_AUTH_PASSWORD: z.string().default(""),
   TRUST_PROXY: z.coerce.number().int().min(0).default(0),
+  DATABASE_URL: z.string().default(""),
+  TRIAGE_CONCURRENCY: z.coerce.number().int().min(1).max(10).default(3),
 });
 
 const parsed = Env.safeParse(process.env);
@@ -51,6 +53,8 @@ export const config = {
   authUser: env.BASIC_AUTH_USER,
   authPassword: env.BASIC_AUTH_PASSWORD,
   trustProxy: env.TRUST_PROXY,
+  databaseUrl: env.DATABASE_URL,
+  triageConcurrency: env.TRIAGE_CONCURRENCY,
 };
 
 if (config.production) {

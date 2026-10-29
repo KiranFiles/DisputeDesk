@@ -1,0 +1,63 @@
+# Render Blueprint: a web service, a database, and a cron job that pre-triages new disputes.
+# Fill every `sync: false` value in the Render dashboard after the first sync. The cron job needs the same
+# values as the web service because the server validates its configuration at startup in production.
+services:
+  - type: web
+    name: disputedesk
+    runtime: docker
+    plan: starter
+    healthCheckPath: /healthz
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: TRUST_PROXY
+        value: "1"
+      - key: DATABASE_URL
+        fromDatabase:
+          name: disputedesk-db
+          property: connectionString
+      - key: PAYPAL_BASE_URL
+        value: https://api-m.sandbox.paypal.com
+      - key: PAYPAL_CLIENT_ID
+        sync: false
+      - key: PAYPAL_CLIENT_SECRET
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: BASIC_AUTH_USER
+        sync: false
+      - key: BASIC_AUTH_PASSWORD
+        sync: false
+      - key: VITE_AG_STUDIO_LICENSE
+        sync: false
+
+  # Runs the same read-only triage as the dashboard's "Triage all open cases" button.
+  - type: cron
+    name: disputedesk-triage
+    runtime: docker
+    plan: starter
+    schedule: "*/30 * * * *"
+    dockerCommand: node server/dist/worker.js
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        fromDatabase:
+          name: disputedesk-db
+          property: connectionString
+      - key: PAYPAL_BASE_URL
+        value: https://api-m.sandbox.paypal.com
+      - key: PAYPAL_CLIENT_ID
+        sync: false
+      - key: PAYPAL_CLIENT_SECRET
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: BASIC_AUTH_USER
+        sync: false
+      - key: BASIC_AUTH_PASSWORD
+        sync: false
+
+databases:
+  - name: disputedesk-db
+    plan: basic-256mb

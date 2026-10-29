@@ -1,6 +1,9 @@
-import { useEffect, useRef, useState } from "react";
-import { ArrowLeft, ArrowRight, Check, CheckCircle2, ChevronRight, Clock3, FileCheck2, History, Inbox, LoaderCircle, MessageSquare, RefreshCw, Search, ShieldCheck, Sparkles, TriangleAlert, Undo2, X } from "lucide-react";
+import { lazy, Suspense, useEffect, useRef, useState } from "react";
+import { ArrowLeft, ArrowRight, Check, CheckCircle2, ChevronRight, Clock3, FileCheck2, History, Inbox, LayoutDashboard, LoaderCircle, MessageSquare, RefreshCw, Search, ShieldCheck, Sparkles, TriangleAlert, Undo2, X } from "lucide-react";
 import { api, type ActionBody, type AuditEntry, type DisputeDetail, type DisputeSummary, type Health, type Triage, type TriageResult } from "./api";
+
+// AG Studio is large, so it loads only when the Insights tab is first opened.
+const Dashboard = lazy(() => import("./Dashboard"));
 
 const money = (amount?: { currency_code: string; value: string }) =>
   amount ? new Intl.NumberFormat("en-US", { style: "currency", currency: amount.currency_code }).format(Number(amount.value)) : "Not available";
@@ -49,7 +52,8 @@ export default function App() {
   const [audit, setAudit] = useState<AuditEntry[]>([]);
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState("open");
-  const [view, setView] = useState<"cases" | "activity">("cases");
+  const [view, setView] = useState<"cases" | "activity" | "insights">("cases");
+  const [insightsOpened, setInsightsOpened] = useState(false);
   const [action, setAction] = useState<Triage["recommendedAction"]>("SEND_MESSAGE");
   const [confirmation, setConfirmation] = useState<ActionBody | null>(null);
   const [message, setMessage] = useState("");
@@ -75,6 +79,11 @@ export default function App() {
       const next = await api.dispute(id);
       if (version === selectionVersion.current) setDetail(next);
     } catch (failure) { if (version === selectionVersion.current) setError((failure as Error).message); }
+  };
+
+  const openCase = (id: string) => {
+    setView("cases"); setFilter("all"); setQuery("");
+    void select(id);
   };
 
   const refresh = async () => {
@@ -144,11 +153,11 @@ export default function App() {
       <div><span className="metric-icon amber"><Clock3 /></span><div><span className="muted">Due within 3 days</span><strong>{busy === "loading" ? "-" : dueSoon}</strong></div></div>
       <div><span className="metric-icon green"><CheckCircle2 /></span><div><span className="muted">Resolved cases</span><strong>{busy === "loading" ? "-" : disputes.length - open.length}</strong></div></div>
     </div>
-    <nav className="view-tabs" aria-label="Workspace views"><button aria-current={view === "cases" ? "page" : undefined} onClick={() => setView("cases")}><Inbox />Case inbox</button><button aria-current={view === "activity" ? "page" : undefined} onClick={() => setView("activity")}><History />Activity<span className="count">{audit.length}</span></button></nav>
+    <nav className="view-tabs" aria-label="Workspace views"><button aria-current={view === "cases" ? "page" : undefined} onClick={() => setView("cases")}><Inbox />Case inbox</button><button aria-current={view === "insights" ? "page" : undefined} onClick={() => { setInsightsOpened(true); setView("insights"); }}><LayoutDashboard />Insights</button><button aria-current={view === "activity" ? "page" : undefined} onClick={() => setView("activity")}><History />Activity<span className="count">{audit.length}</span></button></nav>
     {error && <div className="banner error" role="alert"><TriangleAlert /><span>{error}</span><button className="icon-button" onClick={() => setError(null)} title="Dismiss error" aria-label="Dismiss error"><X /></button></div>}
     {notice && <div className="banner success" role="status"><CheckCircle2 /><span>{notice}</span><button className="icon-button" onClick={() => setNotice(null)} title="Dismiss notification" aria-label="Dismiss notification"><X /></button></div>}
 
-    <main id="workspace" className={view === "cases" ? "workspace" : "activity-view"}>
+    <main id="workspace" className={view === "cases" ? "workspace" : "activity-view"} hidden={view === "insights"}>
       {view === "activity" ? <section><div className="section-heading"><h2>Recent activity</h2><span className="muted">Current server session</span></div>{audit.length ? <ol className="activity-list">{audit.map((entry, index) => <li key={`${entry.time}-${index}`}><span className="metric-icon green"><Check /></span><div><h3>{label(entry.action)}</h3><p className="muted">{entry.disputeId} / {date(entry.time)} / {new Date(entry.time).toLocaleTimeString()}</p><p>{entry.detail}</p></div></li>)}</ol> : <div className="empty"><History /><h2>No activity yet</h2><p>Submitted actions will appear here.</p></div>}</section> : <>
         <aside className="queue" aria-label="Case inbox">
           <div className="section-heading"><h2>Cases</h2><span className="count">{visible.length}</span></div>
@@ -194,6 +203,7 @@ export default function App() {
         </section>
       </>}
     </main>
+    {insightsOpened && <div hidden={view !== "insights"}><Suspense fallback={<div className="empty" role="status"><LoaderCircle className="spin" /><p>Loading dashboard...</p></div>}><Dashboard active={view === "insights"} aiEnabled={Boolean(health?.aiConfigured)} onOpenCase={openCase} /></Suspense></div>}
     <footer className="page-footer"><span>DisputeDesk</span><span>Independent tool / PayPal sandbox</span><span><ShieldCheck />Merchant-approved actions</span></footer>
     {confirmation && detail && <ConfirmAction body={confirmation} detail={detail} busy={busy !== null} onClose={() => setConfirmation(null)} onConfirm={execute} />}
   </div>;

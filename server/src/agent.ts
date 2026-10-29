@@ -101,7 +101,7 @@ export interface TriageResult {
 export class AiError extends Error {}
 
 let client: OpenAI | null = null;
-const getClient = () =>
+export const getClient = () =>
   (client ??= new OpenAI({ apiKey: config.aiKey, baseURL: config.aiBaseUrl, timeout: 45_000, maxRetries: 2 }));
 
 // Gemini's OpenAI-compatible API can't combine tools with a JSON schema, so the schema goes in the prompt.

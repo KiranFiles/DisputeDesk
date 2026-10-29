@@ -131,6 +131,45 @@ const transactions: Record<string, Json> = {
   },
 };
 
+// Extra sample cases so the dashboard has enough rows to be meaningful.
+const extras: { n: number; reason: string; status: string; amount: string; opened: number; due: number | null; buyer: string; item: string; claim: string; carrier: string; delivered: boolean; outcome?: string }[] = [
+  { n: 1005, reason: "MERCHANDISE_OR_SERVICE_NOT_RECEIVED", status: "WAITING_FOR_SELLER_RESPONSE", amount: "212.00", opened: 8, due: 1, buyer: "Elena Rossi", item: "Leather weekender bag", claim: "Nothing arrived at my address.", carrier: "DHL", delivered: false },
+  { n: 1006, reason: "UNAUTHORISED", status: "WAITING_FOR_SELLER_RESPONSE", amount: "689.90", opened: 4, due: 6, buyer: "Jonas Keller", item: "Mechanical keyboard, 2 units", claim: "I never authorised this payment.", carrier: "UPS", delivered: true },
+  { n: 1007, reason: "MERCHANDISE_OR_SERVICE_NOT_AS_DESCRIBED", status: "UNDER_REVIEW", amount: "64.00", opened: 12, due: null, buyer: "Aiko Tanaka", item: "Linen tablecloth", claim: "The size is smaller than listed.", carrier: "USPS", delivered: true },
+  { n: 1008, reason: "MERCHANDISE_OR_SERVICE_NOT_RECEIVED", status: "WAITING_FOR_SELLER_RESPONSE", amount: "29.95", opened: 1, due: 10, buyer: "Sam Okafor", item: "Phone case", claim: "Still waiting for my order.", carrier: "USPS", delivered: false },
+  { n: 1009, reason: "CREDIT_NOT_PROCESSED", status: "WAITING_FOR_SELLER_RESPONSE", amount: "310.00", opened: 9, due: -1, buyer: "Lucia Ferreira", item: "Espresso machine", claim: "Returned it last month, no refund yet.", carrier: "FedEx", delivered: true },
+  { n: 1010, reason: "MERCHANDISE_OR_SERVICE_NOT_AS_DESCRIBED", status: "RESOLVED", amount: "45.00", opened: 25, due: null, buyer: "Ben Carter", item: "Scented candle set", claim: "Scent is different from the description.", carrier: "UPS", delivered: true, outcome: "RESOLVED_SELLER_FAVOUR" },
+  { n: 1011, reason: "MERCHANDISE_OR_SERVICE_NOT_RECEIVED", status: "RESOLVED", amount: "150.00", opened: 30, due: null, buyer: "Mia Johansson", item: "Yoga mat bundle", claim: "Package lost in transit.", carrier: "DHL", delivered: false, outcome: "RESOLVED_BUYER_FAVOUR" },
+];
+
+for (const e of extras) {
+  const tx = `TX-${e.n + 4000}`;
+  const created = ago(e.opened);
+  disputes.push({
+    dispute_id: `PP-D-${e.n}`,
+    reason: e.reason,
+    status: e.status,
+    dispute_amount: usd(e.amount),
+    create_time: created,
+    update_time: created,
+    seller_response_due_date: e.due === null ? undefined : ahead(e.due),
+    dispute_life_cycle_stage: "INQUIRY",
+    ...(e.outcome && { dispute_outcome: e.outcome }),
+    disputed_transactions: [{ seller_transaction_id: tx, buyer: { name: e.buyer }, gross_amount: usd(e.amount), items: [{ item_name: e.item, item_quantity: "1" }] }],
+    messages: [{ posted_by: "BUYER", time_posted: created, content: e.claim }],
+  });
+  transactions[tx] = {
+    transaction_info: { transaction_id: tx, transaction_initiation_date: ago(e.opened + 10), transaction_status: "S", transaction_amount: usd(e.amount) },
+    payer_info: { email_address: `${e.buyer.split(" ")[0].toLowerCase()}@example.com`, country_code: "US", account_created: ago(800) },
+    shipping_info: { name: e.buyer, address: "On file" },
+    tracking_info: [
+      e.delivered
+        ? { carrier: e.carrier, tracking_number: `TRK${e.n}0001`, status: "DELIVERED", delivered_time: ago(e.opened - 1), signed_by: null }
+        : { carrier: e.carrier, tracking_number: `TRK${e.n}0001`, status: "IN_TRANSIT", delivered_time: null, signed_by: null },
+    ],
+  };
+}
+
 const find = (id: string): Json => {
   const d = disputes.find((x) => x.dispute_id === id);
   if (!d) throw new PayPalError(404, `Dispute ${id} not found`);
