@@ -2,6 +2,7 @@
   "name": "disputedesk",
   "private": true,
   "version": "1.0.0",
+  "license": "MIT",
   "description": "AI dispute triage agent for PayPal merchants",
   "workspaces": [
     "server",
